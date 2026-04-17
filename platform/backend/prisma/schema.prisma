@@ -1,0 +1,223 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum SubmissionStatus {
+  PENDING
+  RUNNING
+  AC
+  WA
+  TLE
+  MLE
+  RE
+  CE
+  IE
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  username     String   @unique
+  passwordHash String
+  avatarUrl    String?
+  bio          String?
+  role         Role     @default(USER)
+  rating       Int      @default(1500)
+  createdAt    DateTime @default(now())
+
+  submissions          Submission[]
+  discussions          Discussion[]
+  discussionReplies    DiscussionReply[]
+  contestParticipants  ContestParticipant[]
+}
+
+model Problem {
+  id            String     @id @default(cuid())
+  slug          String     @unique
+  title         String
+  statementMd   String
+  constraintsMd String?
+  difficulty    Difficulty @default(EASY)
+  isPublished   Boolean    @default(true)
+  createdAt     DateTime   @default(now())
+
+  starterCodes    StarterCode[]
+  testCases       TestCase[]
+  tags            ProblemTag[]
+  submissions     Submission[]
+  discussions     Discussion[]
+  contestProblems ContestProblem[]
+  dailyProblems   DailyProblem[]
+}
+
+model StarterCode {
+  id         String  @id @default(cuid())
+  problemId  String
+  languageId Int
+  code       String
+  problem    Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
+
+  @@unique([problemId, languageId])
+}
+
+model TestCase {
+  id             String   @id @default(cuid())
+  problemId      String
+  input          String
+  expectedOutput String
+  isSample       Boolean  @default(false)
+  order          Int      @default(0)
+  problem        Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
+
+  submissionCases SubmissionCase[]
+
+  @@index([problemId, order])
+}
+
+model Tag {
+  id       String       @id @default(cuid())
+  slug     String       @unique
+  name     String
+  problems ProblemTag[]
+}
+
+model ProblemTag {
+  problemId String
+  tagId     String
+  problem   Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  tag       Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([problemId, tagId])
+}
+
+model Submission {
+  id            String           @id @default(cuid())
+  userId        String
+  problemId     String
+  contestId     String?
+  languageId    Int
+  sourceCode    String
+  status        SubmissionStatus @default(PENDING)
+  runtimeMs    Int?
+  memoryKb     Int?
+  passedCount   Int              @default(0)
+  totalCount    Int              @default(0)
+  judge0Tokens  String[]         @default([])
+  errorMessage  String?
+  createdAt     DateTime         @default(now())
+  finishedAt    DateTime?
+
+  user    User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  problem Problem          @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  contest Contest?         @relation(fields: [contestId], references: [id], onDelete: SetNull)
+  cases   SubmissionCase[]
+
+  @@index([userId, createdAt])
+  @@index([problemId, status])
+  @@index([contestId])
+}
+
+model SubmissionCase {
+  id           String           @id @default(cuid())
+  submissionId String
+  testCaseId   String
+  judge0Token  String           @unique
+  status       SubmissionStatus @default(PENDING)
+  runtimeMs    Int?
+  memoryKb     Int?
+  stdout       String?
+  stderr       String?
+  compileOutput String?
+
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  testCase   TestCase   @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
+
+  @@index([submissionId])
+}
+
+model Discussion {
+  id        String   @id @default(cuid())
+  problemId String
+  userId    String
+  title     String
+  bodyMd    String
+  upvotes   Int      @default(0)
+  createdAt DateTime @default(now())
+
+  problem Problem           @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  user    User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  replies DiscussionReply[]
+
+  @@index([problemId, createdAt])
+}
+
+model DiscussionReply {
+  id           String   @id @default(cuid())
+  discussionId String
+  userId       String
+  bodyMd       String
+  createdAt    DateTime @default(now())
+
+  discussion Discussion @relation(fields: [discussionId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Contest {
+  id            String   @id @default(cuid())
+  slug          String   @unique
+  title         String
+  descriptionMd String
+  startsAt      DateTime
+  endsAt        DateTime
+  createdAt     DateTime @default(now())
+
+  problems     ContestProblem[]
+  participants ContestParticipant[]
+  submissions  Submission[]
+}
+
+model ContestProblem {
+  contestId String
+  problemId String
+  points    Int     @default(100)
+  order     Int     @default(0)
+  contest   Contest @relation(fields: [contestId], references: [id], onDelete: Cascade)
+  problem   Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
+
+  @@id([contestId, problemId])
+}
+
+model ContestParticipant {
+  contestId        String
+  userId           String
+  score            Int       @default(0)
+  lastSubmissionAt DateTime?
+  joinedAt         DateTime  @default(now())
+
+  contest Contest @relation(fields: [contestId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([contestId, userId])
+}
+
+model DailyProblem {
+  date      DateTime @id @db.Date
+  problemId String
+  problem   Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
+}
