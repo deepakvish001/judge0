@@ -34,7 +34,7 @@ model User {
   id           String   @id @default(cuid())
   email        String   @unique
   username     String   @unique
-  passwordHash String
+  passwordHash String?
   avatarUrl    String?
   bio          String?
   role         Role     @default(USER)
@@ -45,6 +45,21 @@ model User {
   discussions          Discussion[]
   discussionReplies    DiscussionReply[]
   contestParticipants  ContestParticipant[]
+  oauthAccounts        OAuthAccount[]
+  problemRatings       ProblemRating[]
+}
+
+model OAuthAccount {
+  id           String   @id @default(cuid())
+  userId       String
+  provider     String
+  providerUid  String
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerUid])
+  @@index([userId])
 }
 
 model Problem {
@@ -64,6 +79,30 @@ model Problem {
   discussions     Discussion[]
   contestProblems ContestProblem[]
   dailyProblems   DailyProblem[]
+  editorial       Editorial?
+  ratings         ProblemRating[]
+}
+
+model Editorial {
+  id        String   @id @default(cuid())
+  problemId String   @unique
+  bodyMd    String
+  updatedAt DateTime @updatedAt
+  problem   Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
+}
+
+model ProblemRating {
+  userId    String
+  problemId String
+  value     Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  problem Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
+
+  @@id([userId, problemId])
+  @@index([problemId])
 }
 
 model StarterCode {

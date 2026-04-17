@@ -4,15 +4,23 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api } from '@/lib/api';
 import { StatusBadge } from '@/components/StatusBadge';
+import { Pager } from '@/components/Pager';
 
 export default function SubmissionsPage() {
   const [items, setItems] = useState<any[]>([]);
+  const [page, setPage] = useState(1);
+  const [pageCount, setPageCount] = useState(1);
   useEffect(() => {
     api
-      .get<{ submissions: any[] }>('/api/submissions?mine=true')
-      .then((r) => setItems(r.submissions))
+      .get<{ submissions: any[]; pageCount: number }>(
+        `/api/submissions?mine=true&page=${page}&limit=20`,
+      )
+      .then((r) => {
+        setItems(r.submissions);
+        setPageCount(r.pageCount);
+      })
       .catch(() => setItems([]));
-  }, []);
+  }, [page]);
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold">My Submissions</h1>
@@ -65,6 +73,7 @@ export default function SubmissionsPage() {
           </tbody>
         </table>
       </div>
+      <Pager page={page} pageCount={pageCount} onChange={setPage} />
     </div>
   );
 }

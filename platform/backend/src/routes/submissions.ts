@@ -2,40 +2,45 @@ import { Router } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { authRequired } from '../middleware/auth.js';
 import { HttpError } from '../middleware/error.js';
+import { pageEnvelope, pagination } from '../lib/pagination.js';
 
 export const submissionsRouter = Router();
 
 submissionsRouter.get('/', authRequired, async (req, res, next) => {
   try {
+    const p = pagination(req, 20);
     const problemSlug = req.query.problem as string | undefined;
     const mineOnly = req.query.mine === 'true';
     const where: any = {};
     if (mineOnly) where.userId = req.user!.id;
     if (problemSlug) where.problem = { slug: problemSlug };
 
-    const subs = await prisma.submission.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      take: 50,
-      include: {
-        problem: { select: { slug: true, title: true } },
-        user: { select: { username: true } },
-      },
-    });
-    res.json({
-      submissions: subs.map((s) => ({
-        id: s.id,
-        problem: s.problem,
-        username: s.user.username,
-        status: s.status,
-        languageId: s.languageId,
-        runtimeMs: s.runtimeMs,
-        memoryKb: s.memoryKb,
-        passedCount: s.passedCount,
-        totalCount: s.totalCount,
-        createdAt: s.createdAt,
-      })),
-    });
+    const [subs, total] = await Promise.all([
+      prisma.submission.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: p.skip,
+        take: p.limit,
+        include: {
+          problem: { select: { slug: true, title: true } },
+          user: { select: { username: true } },
+        },
+      }),
+      prisma.submission.count({ where }),
+    ]);
+    const items = subs.map((s) => ({
+      id: s.id,
+      problem: s.problem,
+      username: s.user.username,
+      status: s.status,
+      languageId: s.languageId,
+      runtimeMs: s.runtimeMs,
+      memoryKb: s.memoryKb,
+      passedCount: s.passedCount,
+      totalCount: s.totalCount,
+      createdAt: s.createdAt,
+    }));
+    res.json({ ...pageEnvelope(items, total, p), submissions: items });
   } catch (e) {
     next(e);
   }

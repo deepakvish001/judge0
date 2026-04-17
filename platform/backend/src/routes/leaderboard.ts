@@ -1,19 +1,20 @@
 import { Router } from 'express';
 import { prisma } from '../lib/prisma.js';
+import { pageEnvelope, pagination } from '../lib/pagination.js';
 
 export const leaderboardRouter = Router();
 
-leaderboardRouter.get('/', async (_req, res, next) => {
+leaderboardRouter.get('/', async (req, res, next) => {
   try {
+    const p = pagination(req, 25, 100);
     const grouped = await prisma.submission.groupBy({
       by: ['userId'],
       where: { status: 'AC' },
       _count: { problemId: true },
     });
-    const ranked = await Promise.all(
+    const all = await Promise.all(
       grouped
         .sort((a, b) => b._count.problemId - a._count.problemId)
-        .slice(0, 100)
         .map(async (g) => {
           const distinct = await prisma.submission.findMany({
             where: { userId: g.userId, status: 'AC' },
@@ -31,10 +32,12 @@ leaderboardRouter.get('/', async (_req, res, next) => {
           };
         }),
     );
-    ranked.sort((a, b) => b.solved - a.solved);
-    res.json({
-      leaderboard: ranked.map((r, i) => ({ rank: i + 1, ...r })),
-    });
+    all.sort((a, b) => b.solved - a.solved);
+    const total = all.length;
+    const page = all
+      .slice(p.skip, p.skip + p.limit)
+      .map((r, i) => ({ rank: p.skip + i + 1, ...r }));
+    res.json({ ...pageEnvelope(page, total, p), leaderboard: page });
   } catch (e) {
     next(e);
   }

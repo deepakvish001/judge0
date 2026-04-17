@@ -59,7 +59,7 @@ authRouter.post('/login', async (req, res, next) => {
         OR: [{ email: emailOrUsername }, { username: emailOrUsername }],
       },
     });
-    if (!user) throw new HttpError(401, 'invalid credentials');
+    if (!user || !user.passwordHash) throw new HttpError(401, 'invalid credentials');
     const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) throw new HttpError(401, 'invalid credentials');
     const auth = {

@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { api } from '@/lib/api';
 import { Markdown } from '@/components/Markdown';
+import { MdEditor } from '@/components/MdEditor';
 import { useMe } from '@/lib/me';
 
 export default function DiscussionDetail() {
@@ -69,11 +70,7 @@ export default function DiscussionDetail() {
       {me ? (
         <form onSubmit={postReply} className="card space-y-2">
           <label className="label">Reply (Markdown)</label>
-          <textarea
-            value={reply}
-            onChange={(e) => setReply(e.target.value)}
-            className="input h-32 font-mono text-sm"
-          />
+          <MdEditor value={reply} onChange={setReply} height={200} />
           <button type="submit" className="btn-primary">
             Post reply
           </button>

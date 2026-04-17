@@ -3,15 +3,23 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api } from '@/lib/api';
+import { Pager } from '@/components/Pager';
 
 export default function LeaderboardPage() {
   const [items, setItems] = useState<any[]>([]);
+  const [page, setPage] = useState(1);
+  const [pageCount, setPageCount] = useState(1);
   useEffect(() => {
     api
-      .get<{ leaderboard: any[] }>('/api/leaderboard')
-      .then((r) => setItems(r.leaderboard))
+      .get<{ leaderboard: any[]; pageCount: number }>(
+        `/api/leaderboard?page=${page}&limit=25`,
+      )
+      .then((r) => {
+        setItems(r.leaderboard);
+        setPageCount(r.pageCount);
+      })
       .catch(() => setItems([]));
-  }, []);
+  }, [page]);
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold">Global Leaderboard</h1>
@@ -46,6 +54,7 @@ export default function LeaderboardPage() {
           </tbody>
         </table>
       </div>
+      <Pager page={page} pageCount={pageCount} onChange={setPage} />
     </div>
   );
 }

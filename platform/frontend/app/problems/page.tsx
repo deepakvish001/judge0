@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api } from '@/lib/api';
 import { DifficultyBadge } from '@/components/DifficultyBadge';
+import { Pager } from '@/components/Pager';
+import { Stars } from '@/components/Stars';
 
 interface ProblemRow {
   id: string;
@@ -12,11 +14,16 @@ interface ProblemRow {
   difficulty: string;
   tags: { slug: string; name: string }[];
   submissionCount: number;
+  ratingAvg: number;
+  ratingCount: number;
   solved: boolean;
 }
 
 export default function ProblemsPage() {
   const [items, setItems] = useState<ProblemRow[]>([]);
+  const [total, setTotal] = useState(0);
+  const [pageCount, setPageCount] = useState(1);
+  const [page, setPage] = useState(1);
   const [tagOpts, setTagOpts] = useState<{ slug: string; name: string }[]>([]);
   const [search, setSearch] = useState('');
   const [difficulty, setDifficulty] = useState('');
@@ -34,11 +41,23 @@ export default function ProblemsPage() {
     if (search) params.set('search', search);
     if (difficulty) params.set('difficulty', difficulty);
     if (tag) params.set('tag', tag);
-    const q = params.toString();
+    params.set('page', String(page));
+    params.set('limit', '20');
     api
-      .get<{ problems: ProblemRow[] }>(`/api/problems${q ? '?' + q : ''}`)
-      .then((r) => setItems(r.problems))
+      .get<{ problems: ProblemRow[]; total: number; pageCount: number }>(
+        `/api/problems?${params.toString()}`,
+      )
+      .then((r) => {
+        setItems(r.problems);
+        setTotal(r.total);
+        setPageCount(r.pageCount);
+      })
       .catch(() => setItems([]));
+  }, [search, difficulty, tag, page]);
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setPage(1);
   }, [search, difficulty, tag]);
 
   return (
@@ -73,6 +92,9 @@ export default function ProblemsPage() {
             </option>
           ))}
         </select>
+        <span className="ml-auto self-center text-xs text-muted">
+          {total} problems
+        </span>
       </div>
 
       <div className="overflow-hidden rounded-lg border border-border">
@@ -83,6 +105,7 @@ export default function ProblemsPage() {
               <th className="px-4 py-2">Title</th>
               <th className="px-4 py-2">Difficulty</th>
               <th className="px-4 py-2">Tags</th>
+              <th className="px-4 py-2">Rating</th>
               <th className="px-4 py-2">Submissions</th>
             </tr>
           </thead>
@@ -104,12 +127,19 @@ export default function ProblemsPage() {
                 <td className="px-4 py-2 text-muted">
                   {p.tags.map((t) => t.name).join(', ')}
                 </td>
+                <td className="px-4 py-2">
+                  <Stars
+                    value={p.ratingAvg}
+                    count={p.ratingCount}
+                    size="sm"
+                  />
+                </td>
                 <td className="px-4 py-2 text-muted">{p.submissionCount}</td>
               </tr>
             ))}
             {items.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-muted">
+                <td colSpan={6} className="px-4 py-6 text-center text-muted">
                   No problems found.
                 </td>
               </tr>
@@ -117,6 +147,7 @@ export default function ProblemsPage() {
           </tbody>
         </table>
       </div>
+      <Pager page={page} pageCount={pageCount} onChange={setPage} />
     </div>
   );
 }

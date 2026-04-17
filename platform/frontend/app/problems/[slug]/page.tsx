@@ -9,6 +9,7 @@ import { CodeEditor } from '@/components/CodeEditor';
 import { Markdown } from '@/components/Markdown';
 import { DifficultyBadge } from '@/components/DifficultyBadge';
 import { StatusBadge } from '@/components/StatusBadge';
+import { Stars } from '@/components/Stars';
 
 interface ProblemDetail {
   id: string;
@@ -20,6 +21,9 @@ interface ProblemDetail {
   starterCodes: { languageId: number; code: string }[];
   tags: { slug: string; name: string }[];
   sampleTestCases: { id: string; input: string; expectedOutput: string }[];
+  ratingAvg: number;
+  ratingCount: number;
+  myRating: number | null;
 }
 
 interface RunResult {
@@ -59,14 +63,18 @@ export default function ProblemDetailPage() {
   const [languageId, setLanguageId] = useState<number>(71);
   const [code, setCode] = useState('');
   const [stdin, setStdin] = useState('');
-  const [tab, setTab] = useState<'description' | 'submissions' | 'discuss'>(
-    'description',
-  );
+  const [tab, setTab] = useState<
+    'description' | 'editorial' | 'submissions' | 'discuss'
+  >('description');
   const [bottomTab, setBottomTab] = useState<'cases' | 'result'>('cases');
   const [runResult, setRunResult] = useState<RunResult | null>(null);
   const [submission, setSubmission] = useState<SubmissionDetail | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [editorial, setEditorial] = useState<{
+    locked: boolean;
+    bodyMd: string | null;
+  } | null>(null);
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -108,6 +116,35 @@ export default function ProblemDetailPage() {
   }, [code, languageId, slug, problem]);
 
   const lang = useMemo(() => langById(languageId), [languageId]);
+
+  useEffect(() => {
+    if (tab !== 'editorial' || editorial) return;
+    api
+      .get<{ locked: boolean; bodyMd: string | null }>(
+        `/api/problems/${slug}/editorial`,
+      )
+      .then(setEditorial)
+      .catch(() => setEditorial({ locked: true, bodyMd: null }));
+  }, [tab, slug, editorial]);
+
+  async function onRate(value: number) {
+    if (!problem) return;
+    try {
+      const r = await api.post<{
+        ratingAvg: number;
+        ratingCount: number;
+        myRating: number;
+      }>(`/api/problems/${slug}/rate`, { value });
+      setProblem({
+        ...problem,
+        ratingAvg: r.ratingAvg,
+        ratingCount: r.ratingCount,
+        myRating: r.myRating,
+      });
+    } catch {
+      // ignore — likely not logged in
+    }
+  }
 
   async function onRun() {
     setBusy(true);
@@ -170,6 +207,14 @@ export default function ProblemDetailPage() {
           <div className="mb-2 flex items-center gap-3">
             <h1 className="text-xl font-bold">{problem.title}</h1>
             <DifficultyBadge value={problem.difficulty} />
+            <div className="ml-auto">
+              <Stars
+                value={problem.ratingAvg}
+                count={problem.ratingCount}
+                myRating={problem.myRating}
+                onRate={onRate}
+              />
+            </div>
           </div>
           <div className="flex gap-2 text-xs text-muted">
             {problem.tags.map((t) => (
@@ -180,19 +225,21 @@ export default function ProblemDetailPage() {
           </div>
         </div>
         <div className="flex gap-4 border-b border-border px-4 text-sm text-muted">
-          {(['description', 'submissions', 'discuss'] as const).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`-mb-px border-b-2 px-1 py-2 capitalize ${
-                tab === t
-                  ? 'border-accent text-text'
-                  : 'border-transparent hover:text-text'
-              }`}
-            >
-              {t}
-            </button>
-          ))}
+          {(['description', 'editorial', 'submissions', 'discuss'] as const).map(
+            (t) => (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                className={`-mb-px border-b-2 px-1 py-2 capitalize ${
+                  tab === t
+                    ? 'border-accent text-text'
+                    : 'border-transparent hover:text-text'
+                }`}
+              >
+                {t}
+              </button>
+            ),
+          )}
         </div>
         <div className="max-h-[70vh] overflow-auto p-4">
           {tab === 'description' && (
@@ -221,6 +268,25 @@ export default function ProblemDetailPage() {
                 </>
               )}
             </>
+          )}
+          {tab === 'editorial' && (
+            <div>
+              {!editorial && <p className="text-muted">Loading…</p>}
+              {editorial?.locked && (
+                <p className="text-sm text-muted">
+                  Editorial unlocks after you solve this problem (get an AC
+                  submission).
+                </p>
+              )}
+              {editorial && !editorial.locked && editorial.bodyMd && (
+                <Markdown>{editorial.bodyMd}</Markdown>
+              )}
+              {editorial && !editorial.locked && !editorial.bodyMd && (
+                <p className="text-sm text-muted">
+                  No editorial has been written for this problem yet.
+                </p>
+              )}
+            </div>
           )}
           {tab === 'submissions' && <SubsList slug={slug} />}
           {tab === 'discuss' && <DiscussList slug={slug} />}

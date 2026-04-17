@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { api, ApiError } from '@/lib/api';
 import { LANGUAGES } from '@/lib/languages';
+import { MdEditor } from '@/components/MdEditor';
 
 interface Form {
   slug: string;
@@ -163,20 +164,18 @@ export default function AdminProblemEdit() {
         <div className="card space-y-3">
           <div>
             <label className="label">Statement (Markdown)</label>
-            <textarea
-              className="input h-48 font-mono text-xs"
+            <MdEditor
               value={f.statementMd}
-              onChange={(e) => setF({ ...f, statementMd: e.target.value })}
+              onChange={(v) => setF({ ...f, statementMd: v })}
+              height={260}
             />
           </div>
           <div>
             <label className="label">Constraints (Markdown, optional)</label>
-            <textarea
-              className="input h-24 font-mono text-xs"
+            <MdEditor
               value={f.constraintsMd}
-              onChange={(e) =>
-                setF({ ...f, constraintsMd: e.target.value })
-              }
+              onChange={(v) => setF({ ...f, constraintsMd: v })}
+              height={160}
             />
           </div>
         </div>
@@ -331,6 +330,154 @@ export default function AdminProblemEdit() {
         <button className="btn" onClick={() => router.push('/admin')}>
           Cancel
         </button>
+      </div>
+
+      {!isNew && (
+        <>
+          <CsvImport problemId={id!} />
+          <EditorialEditor problemId={id!} />
+        </>
+      )}
+    </div>
+  );
+}
+
+function CsvImport({ problemId }: { problemId: string }) {
+  const [csv, setCsv] = useState('');
+  const [replace, setReplace] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function onImport() {
+    setBusy(true);
+    setMsg(null);
+    setErr(null);
+    try {
+      const r = await api.post<{ imported: number }>(
+        `/api/admin/problems/${problemId}/test-cases/import`,
+        { csv, replace },
+      );
+      setMsg(`Imported ${r.imported} test cases.`);
+      setCsv('');
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : 'import failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setCsv(await file.text());
+  }
+
+  return (
+    <div className="card space-y-3">
+      <h3 className="text-lg font-semibold">CSV Test-Case Import</h3>
+      <p className="text-xs text-muted">
+        Upload a CSV with columns: <code>input,expectedOutput,isSample</code>.
+        Wrap fields containing commas or newlines in double quotes; escape
+        internal quotes as <code>""</code>.
+      </p>
+      <input type="file" accept=".csv,text/csv" onChange={onFile} />
+      <textarea
+        className="input h-40 font-mono text-xs"
+        placeholder={'input,expectedOutput,isSample\n"1 2","3",true\n"4 5","9",false'}
+        value={csv}
+        onChange={(e) => setCsv(e.target.value)}
+      />
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={replace}
+          onChange={(e) => setReplace(e.target.checked)}
+        />
+        Replace existing test cases
+      </label>
+      <div className="flex items-center gap-3">
+        <button
+          className="btn-primary"
+          disabled={busy || !csv.trim()}
+          onClick={onImport}
+        >
+          {busy ? 'Importing…' : 'Import'}
+        </button>
+        {msg && <span className="text-sm text-accent">{msg}</span>}
+        {err && <span className="text-sm text-danger">{err}</span>}
+      </div>
+    </div>
+  );
+}
+
+function EditorialEditor({ problemId }: { problemId: string }) {
+  const [bodyMd, setBodyMd] = useState('');
+  const [loaded, setLoaded] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    api
+      .get<{ editorial: { bodyMd: string } | null }>(
+        `/api/admin/problems/${problemId}/editorial`,
+      )
+      .then((r) => {
+        setBodyMd(r.editorial?.bodyMd ?? '');
+        setLoaded(true);
+      })
+      .catch(() => setLoaded(true));
+  }, [problemId]);
+
+  async function save() {
+    setBusy(true);
+    setMsg(null);
+    setErr(null);
+    try {
+      await api.put(`/api/admin/problems/${problemId}/editorial`, { bodyMd });
+      setMsg('Saved.');
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : 'save failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove() {
+    if (!confirm('Delete editorial?')) return;
+    setBusy(true);
+    setMsg(null);
+    setErr(null);
+    try {
+      await api.del(`/api/admin/problems/${problemId}/editorial`);
+      setBodyMd('');
+      setMsg('Deleted.');
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : 'delete failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="card space-y-3">
+      <h3 className="text-lg font-semibold">Editorial / Solution</h3>
+      <p className="text-xs text-muted">
+        Shown to users who have already solved this problem.
+      </p>
+      {loaded && (
+        <MdEditor value={bodyMd} onChange={setBodyMd} height={260} />
+      )}
+      <div className="flex items-center gap-3">
+        <button className="btn-primary" disabled={busy} onClick={save}>
+          {busy ? 'Saving…' : 'Save editorial'}
+        </button>
+        <button className="btn" disabled={busy} onClick={remove}>
+          Delete
+        </button>
+        {msg && <span className="text-sm text-accent">{msg}</span>}
+        {err && <span className="text-sm text-danger">{err}</span>}
       </div>
     </div>
   );

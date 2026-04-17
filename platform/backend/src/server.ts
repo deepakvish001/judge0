@@ -17,6 +17,7 @@ import { usersRouter } from './routes/users.js';
 import { adminRouter } from './routes/admin.js';
 import { internalRouter } from './routes/internal.js';
 import { languagesRouter } from './routes/languages.js';
+import { oauthRouter } from './routes/oauth.js';
 import { authOptional } from './middleware/auth.js';
 import { errorHandler } from './middleware/error.js';
 
@@ -44,6 +45,7 @@ const submitLimiter = rateLimit({
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
 app.use('/api/auth', authRouter);
+app.use('/api/auth/oauth', oauthRouter);
 app.use('/api/problems', submitLimiter, problemsRouter);
 app.use('/api/submissions', submissionsRouter);
 app.use('/api/discussions', discussionsRouter);

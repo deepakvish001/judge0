@@ -5,11 +5,13 @@ import { prisma } from '../lib/prisma.js';
 import { judge0 } from '../lib/judge0.js';
 import { authRequired } from '../middleware/auth.js';
 import { HttpError } from '../middleware/error.js';
+import { pageEnvelope, pagination } from '../lib/pagination.js';
 
 export const problemsRouter = Router();
 
 problemsRouter.get('/', async (req, res, next) => {
   try {
+    const p = pagination(req, 20);
     const difficulty = req.query.difficulty as string | undefined;
     const tag = req.query.tag as string | undefined;
     const search = req.query.search as string | undefined;
@@ -18,19 +20,25 @@ problemsRouter.get('/', async (req, res, next) => {
     if (search) where.title = { contains: search, mode: 'insensitive' };
     if (tag) where.tags = { some: { tag: { slug: tag } } };
 
-    const problems = await prisma.problem.findMany({
-      where,
-      orderBy: { createdAt: 'asc' },
-      select: {
-        id: true,
-        slug: true,
-        title: true,
-        difficulty: true,
-        createdAt: true,
-        tags: { select: { tag: { select: { slug: true, name: true } } } },
-        _count: { select: { submissions: true } },
-      },
-    });
+    const [problems, total] = await Promise.all([
+      prisma.problem.findMany({
+        where,
+        orderBy: { createdAt: 'asc' },
+        skip: p.skip,
+        take: p.limit,
+        select: {
+          id: true,
+          slug: true,
+          title: true,
+          difficulty: true,
+          createdAt: true,
+          tags: { select: { tag: { select: { slug: true, name: true } } } },
+          _count: { select: { submissions: true, ratings: true } },
+          ratings: { select: { value: true } },
+        },
+      }),
+      prisma.problem.count({ where }),
+    ]);
 
     let acceptedByProblem: Record<string, boolean> = {};
     if (req.user) {
@@ -44,17 +52,22 @@ problemsRouter.get('/', async (req, res, next) => {
       );
     }
 
-    res.json({
-      problems: problems.map((p) => ({
-        id: p.id,
-        slug: p.slug,
-        title: p.title,
-        difficulty: p.difficulty,
-        tags: p.tags.map((t) => t.tag),
-        submissionCount: p._count.submissions,
-        solved: !!acceptedByProblem[p.id],
-      })),
-    });
+    const items = problems.map((p) => ({
+      id: p.id,
+      slug: p.slug,
+      title: p.title,
+      difficulty: p.difficulty,
+      tags: p.tags.map((t) => t.tag),
+      submissionCount: p._count.submissions,
+      ratingCount: p._count.ratings,
+      ratingAvg:
+        p.ratings.length === 0
+          ? 0
+          : p.ratings.reduce((s, r) => s + r.value, 0) / p.ratings.length,
+      solved: !!acceptedByProblem[p.id],
+    }));
+
+    res.json({ ...pageEnvelope(items, total, p), problems: items });
   } catch (e) {
     next(e);
   }
@@ -72,9 +85,21 @@ problemsRouter.get('/:slug', async (req, res, next) => {
           orderBy: { order: 'asc' },
           select: { id: true, input: true, expectedOutput: true },
         },
+        ratings: { select: { value: true } },
       },
     });
     if (!problem) throw new HttpError(404, 'problem not found');
+
+    let myRating: number | null = null;
+    if (req.user) {
+      const r = await prisma.problemRating.findUnique({
+        where: {
+          userId_problemId: { userId: req.user.id, problemId: problem.id },
+        },
+      });
+      myRating = r?.value ?? null;
+    }
+
     res.json({
       problem: {
         id: problem.id,
@@ -89,7 +114,77 @@ problemsRouter.get('/:slug', async (req, res, next) => {
         })),
         tags: problem.tags.map((t) => t.tag),
         sampleTestCases: problem.testCases,
+        ratingCount: problem.ratings.length,
+        ratingAvg:
+          problem.ratings.length === 0
+            ? 0
+            : problem.ratings.reduce((s, r) => s + r.value, 0) /
+              problem.ratings.length,
+        myRating,
       },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+const rateSchema = z.object({ value: z.number().int().min(1).max(5) });
+
+problemsRouter.post('/:slug/rate', authRequired, async (req, res, next) => {
+  try {
+    const { value } = rateSchema.parse(req.body);
+    const problem = await prisma.problem.findUnique({
+      where: { slug: req.params.slug },
+    });
+    if (!problem) throw new HttpError(404, 'problem not found');
+    await prisma.problemRating.upsert({
+      where: {
+        userId_problemId: { userId: req.user!.id, problemId: problem.id },
+      },
+      create: { userId: req.user!.id, problemId: problem.id, value },
+      update: { value },
+    });
+    const ratings = await prisma.problemRating.findMany({
+      where: { problemId: problem.id },
+      select: { value: true },
+    });
+    const avg =
+      ratings.length === 0
+        ? 0
+        : ratings.reduce((s, r) => s + r.value, 0) / ratings.length;
+    res.json({ ratingCount: ratings.length, ratingAvg: avg, myRating: value });
+  } catch (e) {
+    next(e);
+  }
+});
+
+problemsRouter.get('/:slug/editorial', async (req, res, next) => {
+  try {
+    const problem = await prisma.problem.findUnique({
+      where: { slug: req.params.slug },
+      include: { editorial: true },
+    });
+    if (!problem) throw new HttpError(404, 'problem not found');
+    let unlocked = !!req.user?.role && req.user.role === 'ADMIN';
+    if (!unlocked && req.user) {
+      const ac = await prisma.submission.findFirst({
+        where: {
+          userId: req.user.id,
+          problemId: problem.id,
+          status: 'AC',
+        },
+        select: { id: true },
+      });
+      unlocked = !!ac;
+    }
+    res.json({
+      editorial: problem.editorial
+        ? {
+            bodyMd: unlocked ? problem.editorial.bodyMd : null,
+            locked: !unlocked,
+            updatedAt: problem.editorial.updatedAt,
+          }
+        : null,
     });
   } catch (e) {
     next(e);

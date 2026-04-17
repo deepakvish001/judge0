@@ -3,15 +3,23 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api } from '@/lib/api';
+import { Pager } from '@/components/Pager';
 
 export default function DiscussionsPage() {
   const [items, setItems] = useState<any[]>([]);
+  const [page, setPage] = useState(1);
+  const [pageCount, setPageCount] = useState(1);
   useEffect(() => {
     api
-      .get<{ discussions: any[] }>('/api/discussions')
-      .then((r) => setItems(r.discussions))
+      .get<{ discussions: any[]; pageCount: number }>(
+        `/api/discussions?page=${page}&limit=20`,
+      )
+      .then((r) => {
+        setItems(r.discussions);
+        setPageCount(r.pageCount);
+      })
       .catch(() => setItems([]));
-  }, []);
+  }, [page]);
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold">Discussions</h1>
@@ -39,6 +47,7 @@ export default function DiscussionsPage() {
           <li className="text-muted">No discussions yet.</li>
         )}
       </ul>
+      <Pager page={page} pageCount={pageCount} onChange={setPage} />
     </div>
   );
 }

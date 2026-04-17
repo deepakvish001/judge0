@@ -3,24 +3,30 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { authRequired } from '../middleware/auth.js';
 import { HttpError } from '../middleware/error.js';
+import { pageEnvelope, pagination } from '../lib/pagination.js';
 
 export const discussionsRouter = Router();
 
 discussionsRouter.get('/', async (req, res, next) => {
   try {
+    const p = pagination(req, 20);
     const slug = req.query.problem as string | undefined;
     const where = slug ? { problem: { slug } } : {};
-    const items = await prisma.discussion.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      take: 50,
-      include: {
-        user: { select: { username: true } },
-        problem: { select: { slug: true, title: true } },
-        _count: { select: { replies: true } },
-      },
-    });
-    res.json({ discussions: items });
+    const [items, total] = await Promise.all([
+      prisma.discussion.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: p.skip,
+        take: p.limit,
+        include: {
+          user: { select: { username: true } },
+          problem: { select: { slug: true, title: true } },
+          _count: { select: { replies: true } },
+        },
+      }),
+      prisma.discussion.count({ where }),
+    ]);
+    res.json({ ...pageEnvelope(items, total, p), discussions: items });
   } catch (e) {
     next(e);
   }
