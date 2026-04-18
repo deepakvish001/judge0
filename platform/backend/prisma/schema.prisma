@@ -164,7 +164,6 @@ model Submission {
   memoryKb     Int?
   passedCount   Int              @default(0)
   totalCount    Int              @default(0)
-  judge0Tokens  String[]         @default([])
   errorMessage  String?
   createdAt     DateTime         @default(now())
   finishedAt    DateTime?
@@ -183,7 +182,6 @@ model SubmissionCase {
   id           String           @id @default(cuid())
   submissionId String
   testCaseId   String
-  judge0Token  String           @unique
   status       SubmissionStatus @default(PENDING)
   runtimeMs    Int?
   memoryKb     Int?

@@ -1,10 +1,13 @@
-# Compiler Platform (on top of Judge0)
+# Compiler Platform
 
-A LeetCode-style coding-challenge platform built on top of the Judge0 execution engine.
+A LeetCode-style coding-challenge platform with a **self-hosted code
+executor** — no external API. Each test case runs inside a short-lived,
+resource-capped Docker container spawned by the backend. Works on
+macOS, Linux, and WSL2.
 
 - **Backend** — Node.js + Express + Prisma + PostgreSQL (`./backend`)
 - **Frontend** — Next.js 14 + Tailwind + Monaco editor (`./frontend`)
-- **Execution** — Judge0 (the surrounding Rails app at repo root)
+- **Execution** — Docker-per-submission (see `src/lib/executor.ts`)
 
 ## Features
 
@@ -21,34 +24,52 @@ A LeetCode-style coding-challenge platform built on top of the Judge0 execution 
 
 ## Quickstart
 
-### Linux / cgroup-v1 hosts — run Judge0 locally
+Prereqs: Docker Desktop (macOS/Windows) or Docker Engine (Linux).
+Nothing else.
 
 ```bash
-# Starts Judge0 (server + workers + db + redis) + platform (db + backend + frontend).
-docker compose -f docker-compose.yml -f platform/docker-compose.yml up -d --build
-
-# Give Judge0 ~30s to migrate, then:
+# From repo root. First boot pulls language images (python, node, gcc,
+# openjdk, golang) — a few hundred MB; subsequent starts are instant.
+docker compose -f platform/docker-compose.native.yml up -d --build
 open http://localhost:3000
 ```
 
-### macOS (Apple Silicon / Intel) — use a hosted Judge0
+### How execution works
 
-Docker Desktop on macOS does not expose the cgroup memory controller that
-Judge0's Isolate sandbox needs, so `Run`/`Submit` fail locally with
-`Failed to create control group … No such file or directory`. Use a
-hosted Judge0 instead (e.g. [sulu.sh](https://sulu.sh), free tier).
+Each time you click **Run** or **Submit**, the backend:
 
-```bash
-export JUDGE0_URL=https://judge0-ce.p.sulu.sh
-export JUDGE0_TOKEN=<your-sulu-api-key>
+1. Writes your source + stdin into a shared Docker volume (`platform_sub`).
+2. Spawns a short-lived runner container on the host Docker daemon:
+   ```
+   docker run --rm --network=none --memory=256m --cpus=1
+              --pids-limit=128 --cap-drop=ALL --security-opt=no-new-privileges
+              -v platform_sub:/code:ro -w /code/<id> <image> sh -lc "<cmd>"
+   ```
+3. Captures stdout / stderr / exit code / wall-clock time.
+4. Compares output to the test-case expected output → verdict
+   (`AC` / `WA` / `TLE` / `MLE` / `RE` / `CE`).
 
-# Runs only platform-db + backend + frontend (no local Judge0 containers).
-docker compose -f platform/docker-compose.hosted.yml up -d --build
-open http://localhost:3000
-```
+Supported languages (IDs match the Judge0 convention so existing seed data works):
+Python 3 (71), Node 20 (63), C++17 (54), C (50), Java 21 (62), Go 1.22 (60).
 
-In this mode the backend **polls** Judge0 for submission results instead
-of receiving callbacks (a hosted Judge0 can't reach your laptop).
+### Resource limits (per test case)
+
+| Knob | Default | Env var |
+| --- | --- | --- |
+| CPU | 1 core | `EXEC_CPU_LIMIT` |
+| Memory | 256 MB | passed per-call |
+| Wall-clock | 5 s | passed per-call |
+| PIDs | 128 | `EXEC_PIDS_LIMIT` |
+| Network | disabled | hard-coded |
+| Parallel cases | 4 | `EXEC_PARALLELISM` |
+
+### Security note
+
+Docker's isolation is *not* a strict security boundary. The defaults here
+(`--network=none`, `--cap-drop=ALL`, `--security-opt=no-new-privileges`,
+`--read-only` code mount, `--pids-limit`, `--memory`) are safe for a
+learning/portfolio platform. For public, hostile users add gVisor or run
+the executor on a dedicated jump host.
 
 Seeded accounts (created on first boot):
 
@@ -64,41 +85,45 @@ Seeded problems: `sum-of-two`, `reverse-string`, `fizz-buzz`, `two-sum-indices`.
 ```
 Next.js  ──→  Express API  ──→  PostgreSQL
                    │
-                   └──→  Judge0 (/submissions/batch)
-                              │ callback (PUT) with result
-                              ▼
-                      /api/internal/judge0-callback
-                      (HMAC-signed, updates submission)
+                   └──→  docker run <language image> (sibling container)
+                              │
+                              ▼ stdout/stderr/exit + wall-clock time
+                         grader.ts computes verdict
 ```
 
-- `POST /api/problems/:slug/run` — synchronous Judge0 call with custom stdin.
-- `POST /api/problems/:slug/submit` — creates a `Submission`, batches one Judge0
-  submission per test case, each with its own `callback_url`. Judge0 PUTs the
-  result back; the backend decodes base64 payloads, computes the overall
-  verdict (worst-case across all test cases), and updates contest scores.
+- `POST /api/problems/:slug/run` — synchronous single-case execution with
+  the user's custom stdin, returns stdout/stderr/time/status.
+- `POST /api/problems/:slug/submit` — creates a `Submission` row, kicks
+  off an async runner (`lib/submit-runner.ts`) that executes all test
+  cases in parallel (bounded by `EXEC_PARALLELISM`), writes each
+  `SubmissionCase`, computes the worst-case verdict, and updates contest
+  scores. Client polls `GET /api/submissions/:id` until final.
 
-## Local dev (without Docker)
+## Local dev (backend on host)
 
 ```bash
-# Terminal 1 – Judge0
-docker compose up -d
-
-# Terminal 2 – Postgres (any way you like)
+# Terminal 1 – Postgres
 docker run -p 5432:5432 -e POSTGRES_USER=platform -e POSTGRES_PASSWORD=platform -e POSTGRES_DB=platform postgres:16-alpine
 
-# Terminal 3 – Backend
+# Terminal 2 – Backend
 cd platform/backend
 cp .env.example .env
 npm install
-npx prisma migrate dev --name init
+npx prisma db push --accept-data-loss
 npx tsx prisma/seed.ts
+# docker CLI must be on PATH and the daemon reachable.
 npm run dev
 
-# Terminal 4 – Frontend
+# Terminal 3 – Frontend
 cd platform/frontend
 npm install
 BACKEND_URL=http://localhost:4000 npm run dev
 ```
+
+In host-mode the backend writes to a real host directory instead of a
+Docker volume. Set `SANDBOX_MOUNT=/tmp/platform_sub` and
+`SANDBOX_VOLUME=/tmp/platform_sub` (same value — the executor passes it
+straight to `docker run -v`, which treats absolute paths as bind mounts).
 
 ## Environment variables
 
@@ -106,12 +131,14 @@ BACKEND_URL=http://localhost:4000 npm run dev
 
 | Var | Default | Notes |
 | --- | --- | --- |
-| `DATABASE_URL` | `postgresql://platform:platform@db:5432/platform` | Postgres URL |
+| `DATABASE_URL` | `postgresql://platform:platform@platform-db:5432/platform` | Postgres URL |
 | `JWT_SECRET` | `dev-secret-change-me` | **Change in production** |
-| `JUDGE0_URL` | `http://server:2358` | Judge0 service base URL |
-| `JUDGE0_TOKEN` | `""` | Optional `X-Auth-Token` |
-| `JUDGE0_CALLBACK_SECRET` | `change-me-shared-secret` | HMAC secret for callback URLs |
-| `PUBLIC_BACKEND_URL` | `http://backend:4000` | URL Judge0 uses to reach backend |
+| `SANDBOX_VOLUME` | `platform_sub` | Docker volume name shared with sibling runners |
+| `SANDBOX_MOUNT` | `/sub` | Where the backend sees the volume internally |
+| `DOCKER_BIN` | `docker` | Override to `/usr/bin/docker` if on PATH differs |
+| `EXEC_PARALLELISM` | `4` | Max test cases per submission running at once |
+| `EXEC_CPU_LIMIT` | `1` | `docker run --cpus` value |
+| `EXEC_PIDS_LIMIT` | `128` | `docker run --pids-limit` value |
 | `PORT` | `4000` | |
 | `CORS_ORIGIN` | `http://localhost:3000` | Comma-separated |
 
@@ -123,10 +150,14 @@ cd platform/backend && npm run test    # grader unit tests
 
 ## End-to-end smoke
 
-1. `docker compose -f docker-compose.yml -f platform/docker-compose.yml up -d`
-2. Open `http://localhost:3000`, sign in as `demo` / `demo1234`.
-3. Open `sum-of-two`, keep the default Python starter, click **Run** — expect
-   `3` in the output.
-4. Click **Submit** — verdict should flip to `Accepted` within a few seconds;
+1. `docker compose -f platform/docker-compose.native.yml up -d --build`
+2. First boot: backend pulls language images (~1–2 min). Watch:
+   `docker compose -f platform/docker-compose.native.yml logs -f backend`
+3. Open `http://localhost:3000`, sign in as `demo` / `demo1234`.
+4. Open `sum-of-two`, keep the default Python starter, click **Run** —
+   expect `3` in the output.
+5. Click **Submit** — verdict flips to `Accepted` within a few seconds;
    the submission appears in `/submissions`.
-5. Sign in as `admin` / `admin1234`, open `/admin`, create a new problem.
+6. Submit `while True: pass` as Python — verdict `TLE` after ~5s.
+7. Submit malformed C++ — verdict `CE` with compiler output shown.
+8. Sign in as `admin` / `admin1234`, open `/admin`, create a new problem.

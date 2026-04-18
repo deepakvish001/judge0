@@ -23,6 +23,7 @@ import { solutionsRouter } from './routes/solutions.js';
 import { notificationsRouter } from './routes/notifications.js';
 import { authOptional } from './middleware/auth.js';
 import { errorHandler } from './middleware/error.js';
+import { prePullImages } from './lib/executor.js';
 
 const app = express();
 const port = Number(process.env.PORT ?? 4000);
@@ -68,4 +69,7 @@ app.use(errorHandler);
 
 app.listen(port, () => {
   console.log(`backend listening on :${port}`);
+  prePullImages().catch((e) =>
+    console.warn('runtime image pre-pull failed', e),
+  );
 });

@@ -1,12 +1,10 @@
-# Use when you can't run Judge0 locally (Mac / no cgroup-v1 support) and
-# want to point the platform at a hosted Judge0 (e.g. https://sulu.sh).
+# Native Docker-based execution. Backend spawns short-lived sibling
+# containers on the host Docker daemon (per-test-case sandbox). No Judge0
+# services, no external API. Works on macOS, Linux, and WSL2.
 #
-# Usage:
-#   export JUDGE0_URL=https://judge0-ce.p.sulu.sh
-#   export JUDGE0_TOKEN=<your-sulu-key>
-#   docker compose -f platform/docker-compose.hosted.yml up -d --build
-#
-# This file is self-contained — do NOT combine it with the root compose.
+# Usage (from repo root):
+#   docker compose -f platform/docker-compose.native.yml up -d --build
+#   open http://localhost:3000
 
 services:
   platform-db:
@@ -27,12 +25,15 @@ services:
     environment:
       DATABASE_URL: postgresql://platform:platform@platform-db:5432/platform?schema=public
       JWT_SECRET: ${JWT_SECRET:-change-me-to-a-long-random-string}
-      JUDGE0_URL: ${JUDGE0_URL:-https://judge0-ce.p.sulu.sh}
-      JUDGE0_TOKEN: ${JUDGE0_TOKEN:-}
-      JUDGE0_USE_CALLBACKS: "false"
       CORS_ORIGIN: http://localhost:3000
       PORT: "4000"
       NODE_ENV: development
+      SANDBOX_VOLUME: platform_sub
+      SANDBOX_MOUNT: /sub
+      EXEC_PARALLELISM: "4"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - platform_sub:/sub
     depends_on:
       - platform-db
     ports:
@@ -52,3 +53,5 @@ services:
 
 volumes:
   platform_db:
+  platform_sub:
+    name: platform_sub
