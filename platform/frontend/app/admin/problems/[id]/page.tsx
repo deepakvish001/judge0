@@ -21,6 +21,7 @@ interface Form {
     isSample: boolean;
     order: number;
   }[];
+  hints: { content: string; order: number }[];
 }
 
 const EMPTY: Form = {
@@ -33,6 +34,7 @@ const EMPTY: Form = {
   tags: '',
   starterCodes: [{ languageId: 71, code: '' }],
   testCases: [{ input: '', expectedOutput: '', isSample: true, order: 0 }],
+  hints: [],
 };
 
 export default function AdminProblemEdit() {
@@ -67,6 +69,10 @@ export default function AdminProblemEdit() {
             isSample: t.isSample,
             order: t.order ?? i,
           })),
+          hints: (p.hints ?? []).map((h: any, i: number) => ({
+            content: h.content,
+            order: h.order ?? i,
+          })),
         });
       })
       .catch((e) => setErr(e instanceof ApiError ? e.message : 'load failed'));
@@ -88,6 +94,7 @@ export default function AdminProblemEdit() {
         .filter(Boolean),
       starterCodes: f.starterCodes,
       testCases: f.testCases,
+      hints: f.hints,
     };
     try {
       if (isNew) {
@@ -320,6 +327,60 @@ export default function AdminProblemEdit() {
             </div>
           </div>
         ))}
+      </div>
+
+      <div className="card">
+        <div className="mb-2 flex items-center justify-between">
+          <h3 className="text-lg font-semibold">Hints</h3>
+          <button
+            className="btn"
+            onClick={() =>
+              setF({
+                ...f,
+                hints: [
+                  ...f.hints,
+                  { content: '', order: f.hints.length },
+                ],
+              })
+            }
+          >
+            + Add hint
+          </button>
+        </div>
+        {f.hints.map((h, i) => (
+          <div
+            key={i}
+            className="mb-3 rounded border border-border p-2"
+          >
+            <div className="mb-2 flex items-center gap-2 text-sm text-muted">
+              <span>Hint #{i + 1}</span>
+              <button
+                className="btn ml-auto"
+                onClick={() =>
+                  setF({
+                    ...f,
+                    hints: f.hints.filter((_, j) => j !== i),
+                  })
+                }
+              >
+                Remove
+              </button>
+            </div>
+            <textarea
+              className="input h-20 font-mono text-xs"
+              placeholder="Markdown hint…"
+              value={h.content}
+              onChange={(e) => {
+                const copy = [...f.hints];
+                copy[i] = { ...h, content: e.target.value };
+                setF({ ...f, hints: copy });
+              }}
+            />
+          </div>
+        ))}
+        {f.hints.length === 0 && (
+          <p className="text-sm text-muted">No hints.</p>
+        )}
       </div>
 
       {err && <div className="text-sm text-danger">{err}</div>}

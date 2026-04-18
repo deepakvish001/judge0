@@ -17,6 +17,7 @@ interface ProblemRow {
   ratingAvg: number;
   ratingCount: number;
   solved: boolean;
+  bookmarked: boolean;
 }
 
 export default function ProblemsPage() {
@@ -114,12 +115,19 @@ export default function ProblemsPage() {
               <tr key={p.id} className="border-t border-border hover:bg-panel">
                 <td className="px-4 py-2 text-accent">{p.solved ? '✓' : ''}</td>
                 <td className="px-4 py-2">
-                  <Link
-                    href={`/problems/${p.slug}`}
-                    className="font-medium text-text"
-                  >
-                    {p.title}
-                  </Link>
+                  <span className="flex items-center gap-2">
+                    {p.bookmarked && (
+                      <span className="text-warn" title="Bookmarked">
+                        ★
+                      </span>
+                    )}
+                    <Link
+                      href={`/problems/${p.slug}`}
+                      className="font-medium text-text"
+                    >
+                      {p.title}
+                    </Link>
+                  </span>
                 </td>
                 <td className="px-4 py-2">
                   <DifficultyBadge value={p.difficulty} />

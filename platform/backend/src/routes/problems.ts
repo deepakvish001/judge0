@@ -41,14 +41,24 @@ problemsRouter.get('/', async (req, res, next) => {
     ]);
 
     let acceptedByProblem: Record<string, boolean> = {};
+    let bookmarkedByProblem: Record<string, boolean> = {};
     if (req.user) {
-      const accepted = await prisma.submission.findMany({
-        where: { userId: req.user.id, status: 'AC' },
-        select: { problemId: true },
-        distinct: ['problemId'],
-      });
+      const [accepted, bookmarks] = await Promise.all([
+        prisma.submission.findMany({
+          where: { userId: req.user.id, status: 'AC' },
+          select: { problemId: true },
+          distinct: ['problemId'],
+        }),
+        prisma.bookmark.findMany({
+          where: { userId: req.user.id },
+          select: { problemId: true },
+        }),
+      ]);
       acceptedByProblem = Object.fromEntries(
         accepted.map((a) => [a.problemId, true]),
+      );
+      bookmarkedByProblem = Object.fromEntries(
+        bookmarks.map((b) => [b.problemId, true]),
       );
     }
 
@@ -65,6 +75,7 @@ problemsRouter.get('/', async (req, res, next) => {
           ? 0
           : p.ratings.reduce((s, r) => s + r.value, 0) / p.ratings.length,
       solved: !!acceptedByProblem[p.id],
+      bookmarked: !!bookmarkedByProblem[p.id],
     }));
 
     res.json({ ...pageEnvelope(items, total, p), problems: items });
@@ -91,13 +102,27 @@ problemsRouter.get('/:slug', async (req, res, next) => {
     if (!problem) throw new HttpError(404, 'problem not found');
 
     let myRating: number | null = null;
+    let bookmarked = false;
+    let hintCount = 0;
     if (req.user) {
-      const r = await prisma.problemRating.findUnique({
-        where: {
-          userId_problemId: { userId: req.user.id, problemId: problem.id },
-        },
-      });
+      const [r, bm, hc] = await Promise.all([
+        prisma.problemRating.findUnique({
+          where: {
+            userId_problemId: { userId: req.user.id, problemId: problem.id },
+          },
+        }),
+        prisma.bookmark.findUnique({
+          where: {
+            userId_problemId: { userId: req.user.id, problemId: problem.id },
+          },
+        }),
+        prisma.hint.count({ where: { problemId: problem.id } }),
+      ]);
       myRating = r?.value ?? null;
+      bookmarked = !!bm;
+      hintCount = hc;
+    } else {
+      hintCount = await prisma.hint.count({ where: { problemId: problem.id } });
     }
 
     res.json({
@@ -121,6 +146,8 @@ problemsRouter.get('/:slug', async (req, res, next) => {
             : problem.ratings.reduce((s, r) => s + r.value, 0) /
               problem.ratings.length,
         myRating,
+        bookmarked,
+        hintCount,
       },
     });
   } catch (e) {
@@ -235,6 +262,141 @@ const submitSchema = z.object({
   sourceCode: z.string().min(1).max(64_000),
   contestId: z.string().optional(),
 });
+
+problemsRouter.post(
+  '/:slug/bookmark',
+  authRequired,
+  async (req, res, next) => {
+    try {
+      const problem = await prisma.problem.findUnique({
+        where: { slug: req.params.slug },
+      });
+      if (!problem) throw new HttpError(404, 'problem not found');
+      const existing = await prisma.bookmark.findUnique({
+        where: {
+          userId_problemId: {
+            userId: req.user!.id,
+            problemId: problem.id,
+          },
+        },
+      });
+      if (existing) {
+        await prisma.bookmark.delete({
+          where: {
+            userId_problemId: {
+              userId: req.user!.id,
+              problemId: problem.id,
+            },
+          },
+        });
+        res.json({ bookmarked: false });
+      } else {
+        await prisma.bookmark.create({
+          data: { userId: req.user!.id, problemId: problem.id },
+        });
+        res.json({ bookmarked: true });
+      }
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+problemsRouter.get('/:slug/hints', async (req, res, next) => {
+  try {
+    const problem = await prisma.problem.findUnique({
+      where: { slug: req.params.slug },
+      select: { id: true },
+    });
+    if (!problem) throw new HttpError(404, 'problem not found');
+    const hints = await prisma.hint.findMany({
+      where: { problemId: problem.id },
+      orderBy: { order: 'asc' },
+      select: { id: true, order: true, content: true },
+    });
+    res.json({ hints });
+  } catch (e) {
+    next(e);
+  }
+});
+
+problemsRouter.get('/:slug/solutions', async (req, res, next) => {
+  try {
+    const p = pagination(req, 10);
+    const problem = await prisma.problem.findUnique({
+      where: { slug: req.params.slug },
+      select: { id: true },
+    });
+    if (!problem) throw new HttpError(404, 'problem not found');
+    const [items, total] = await Promise.all([
+      prisma.solution.findMany({
+        where: { problemId: problem.id },
+        orderBy: [{ upvotes: 'desc' }, { createdAt: 'desc' }],
+        skip: p.skip,
+        take: p.limit,
+        select: {
+          id: true,
+          title: true,
+          languageId: true,
+          upvotes: true,
+          createdAt: true,
+          user: { select: { username: true, avatarUrl: true } },
+        },
+      }),
+      prisma.solution.count({ where: { problemId: problem.id } }),
+    ]);
+    res.json({ ...pageEnvelope(items, total, p), solutions: items });
+  } catch (e) {
+    next(e);
+  }
+});
+
+const solutionSchema = z.object({
+  languageId: z.number().int().positive(),
+  title: z.string().min(3).max(200),
+  bodyMd: z.string().min(1).max(50_000),
+  code: z.string().min(1).max(64_000),
+});
+
+problemsRouter.post(
+  '/:slug/solutions',
+  authRequired,
+  async (req, res, next) => {
+    try {
+      const data = solutionSchema.parse(req.body);
+      const problem = await prisma.problem.findUnique({
+        where: { slug: req.params.slug },
+      });
+      if (!problem) throw new HttpError(404, 'problem not found');
+      const ac = await prisma.submission.findFirst({
+        where: {
+          userId: req.user!.id,
+          problemId: problem.id,
+          status: 'AC',
+        },
+        select: { id: true },
+      });
+      if (!ac && req.user!.role !== 'ADMIN')
+        throw new HttpError(
+          403,
+          'you must solve the problem before posting a solution',
+        );
+      const s = await prisma.solution.create({
+        data: {
+          problemId: problem.id,
+          userId: req.user!.id,
+          languageId: data.languageId,
+          title: data.title,
+          bodyMd: data.bodyMd,
+          code: data.code,
+        },
+      });
+      res.status(201).json({ solution: s });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
 
 problemsRouter.post('/:slug/submit', authRequired, async (req, res, next) => {
   try {

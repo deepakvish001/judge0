@@ -32,6 +32,14 @@ const problemSchema = z.object({
       }),
     )
     .default([]),
+  hints: z
+    .array(
+      z.object({
+        content: z.string().min(1),
+        order: z.number().int().default(0),
+      }),
+    )
+    .default([]),
 });
 
 adminRouter.use(adminRequired);
@@ -58,6 +66,7 @@ adminRouter.get('/problems/:id', async (req, res, next) => {
         starterCodes: true,
         testCases: { orderBy: { order: 'asc' } },
         tags: { include: { tag: true } },
+        hints: { orderBy: { order: 'asc' } },
       },
     });
     if (!p) throw new HttpError(404, 'problem not found');
@@ -81,6 +90,7 @@ adminRouter.post('/problems', async (req, res, next) => {
         isPublished: data.isPublished,
         starterCodes: { create: data.starterCodes },
         testCases: { create: data.testCases },
+        hints: { create: data.hints },
         tags: { create: tagIds.map((id) => ({ tagId: id })) },
       },
     });
@@ -98,6 +108,7 @@ adminRouter.put('/problems/:id', async (req, res, next) => {
       prisma.starterCode.deleteMany({ where: { problemId: req.params.id } }),
       prisma.testCase.deleteMany({ where: { problemId: req.params.id } }),
       prisma.problemTag.deleteMany({ where: { problemId: req.params.id } }),
+      prisma.hint.deleteMany({ where: { problemId: req.params.id } }),
       prisma.problem.update({
         where: { id: req.params.id },
         data: {
@@ -109,6 +120,7 @@ adminRouter.put('/problems/:id', async (req, res, next) => {
           isPublished: data.isPublished,
           starterCodes: { create: data.starterCodes },
           testCases: { create: data.testCases },
+          hints: { create: data.hints },
           tags: { create: tagIds.map((id) => ({ tagId: id })) },
         },
       }),

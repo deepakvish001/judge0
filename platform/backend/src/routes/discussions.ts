@@ -89,11 +89,23 @@ discussionsRouter.post(
       const { bodyMd } = replySchema.parse(req.body);
       const d = await prisma.discussion.findUnique({
         where: { id: req.params.id },
+        include: { user: { select: { id: true, username: true } } },
       });
       if (!d) throw new HttpError(404, 'discussion not found');
       const reply = await prisma.discussionReply.create({
         data: { discussionId: d.id, userId: req.user!.id, bodyMd },
       });
+      if (d.user.id !== req.user!.id) {
+        await prisma.notification.create({
+          data: {
+            userId: d.user.id,
+            type: 'discussion_reply',
+            title: `New reply from ${req.user!.username}`,
+            body: `on "${d.title}"`,
+            href: `/discussions/${d.id}`,
+          },
+        });
+      }
       res.status(201).json({ reply });
     } catch (e) {
       next(e);

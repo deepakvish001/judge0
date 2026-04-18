@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { api } from '@/lib/api';
 import { StatusBadge } from '@/components/StatusBadge';
 import { DifficultyBadge } from '@/components/DifficultyBadge';
+import { Heatmap } from '@/components/Heatmap';
 
 export default function UserProfile() {
   const { username } = useParams<{ username: string }>();
@@ -19,12 +20,21 @@ export default function UserProfile() {
   }, [username]);
 
   if (!data) return <p className="text-muted">Loading…</p>;
-  const { user, stats, solved, recent } = data;
+  const { user, stats, solved, recent, heatmap } = data;
   return (
     <div className="space-y-4">
       <div className="card flex items-center gap-4">
         <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[#1c2026] text-2xl">
-          {user.username[0].toUpperCase()}
+          {user.avatarUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={user.avatarUrl}
+              alt={user.username}
+              className="h-14 w-14 rounded-full"
+            />
+          ) : (
+            user.username[0].toUpperCase()
+          )}
         </div>
         <div>
           <h1 className="text-xl font-bold">{user.username}</h1>
@@ -38,11 +48,19 @@ export default function UserProfile() {
           <Stat label="Solved" value={stats.solvedCount} />
           <Stat label="Submissions" value={stats.submissionCount} />
           <Stat
-            label="By difficulty"
-            value={`${stats.byDifficulty.EASY}/${stats.byDifficulty.MEDIUM}/${stats.byDifficulty.HARD}`}
+            label="Easy / Med / Hard"
+            value={`${stats.byDifficulty.EASY} / ${stats.byDifficulty.MEDIUM} / ${stats.byDifficulty.HARD}`}
           />
         </div>
       </div>
+
+      {heatmap && (
+        <div className="card">
+          <h3 className="mb-2 text-lg font-semibold">Activity</h3>
+          <Heatmap since={heatmap.since} days={heatmap.days} />
+        </div>
+      )}
+
       <div className="grid gap-4 md:grid-cols-2">
         <div className="card">
           <h3 className="mb-2 text-lg font-semibold">Solved Problems</h3>
@@ -73,6 +91,23 @@ export default function UserProfile() {
           </ul>
         </div>
       </div>
+
+      {stats.byTag && stats.byTag.length > 0 && (
+        <div className="card">
+          <h3 className="mb-2 text-lg font-semibold">Topics</h3>
+          <div className="flex flex-wrap gap-2">
+            {stats.byTag.map((t: any) => (
+              <span
+                key={t.slug}
+                className="rounded bg-[#1c2026] px-2 py-1 text-xs"
+              >
+                {t.name}
+                <span className="ml-1 text-muted">{t.count}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

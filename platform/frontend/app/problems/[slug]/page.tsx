@@ -24,6 +24,8 @@ interface ProblemDetail {
   ratingAvg: number;
   ratingCount: number;
   myRating: number | null;
+  bookmarked: boolean;
+  hintCount: number;
 }
 
 interface RunResult {
@@ -64,7 +66,7 @@ export default function ProblemDetailPage() {
   const [code, setCode] = useState('');
   const [stdin, setStdin] = useState('');
   const [tab, setTab] = useState<
-    'description' | 'editorial' | 'submissions' | 'discuss'
+    'description' | 'editorial' | 'solutions' | 'submissions' | 'discuss'
   >('description');
   const [bottomTab, setBottomTab] = useState<'cases' | 'result'>('cases');
   const [runResult, setRunResult] = useState<RunResult | null>(null);
@@ -146,6 +148,18 @@ export default function ProblemDetailPage() {
     }
   }
 
+  async function onToggleBookmark() {
+    if (!problem) return;
+    try {
+      const r = await api.post<{ bookmarked: boolean }>(
+        `/api/problems/${slug}/bookmark`,
+      );
+      setProblem({ ...problem, bookmarked: r.bookmarked });
+    } catch {
+      // ignore
+    }
+  }
+
   async function onRun() {
     setBusy(true);
     setError(null);
@@ -207,6 +221,15 @@ export default function ProblemDetailPage() {
           <div className="mb-2 flex items-center gap-3">
             <h1 className="text-xl font-bold">{problem.title}</h1>
             <DifficultyBadge value={problem.difficulty} />
+            <button
+              onClick={onToggleBookmark}
+              title={problem.bookmarked ? 'Remove bookmark' : 'Bookmark'}
+              className={`text-lg leading-none ${
+                problem.bookmarked ? 'text-warn' : 'text-muted hover:text-warn'
+              }`}
+            >
+              {problem.bookmarked ? '★' : '☆'}
+            </button>
             <div className="ml-auto">
               <Stars
                 value={problem.ratingAvg}
@@ -225,8 +248,15 @@ export default function ProblemDetailPage() {
           </div>
         </div>
         <div className="flex gap-4 border-b border-border px-4 text-sm text-muted">
-          {(['description', 'editorial', 'submissions', 'discuss'] as const).map(
-            (t) => (
+          {(
+            [
+              'description',
+              'editorial',
+              'solutions',
+              'submissions',
+              'discuss',
+            ] as const
+          ).map((t) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
@@ -267,8 +297,12 @@ export default function ProblemDetailPage() {
                   ))}
                 </>
               )}
+              {problem.hintCount > 0 && (
+                <HintsPanel slug={slug} total={problem.hintCount} />
+              )}
             </>
           )}
+          {tab === 'solutions' && <SolutionsList slug={slug} />}
           {tab === 'editorial' && (
             <div>
               {!editorial && <p className="text-muted">Loading…</p>}
@@ -531,6 +565,88 @@ function DiscussList({ slug }: { slug: string }) {
       ))}
       {items.length === 0 && (
         <p className="text-muted">No discussions yet — start one!</p>
+      )}
+    </div>
+  );
+}
+
+function HintsPanel({ slug, total }: { slug: string; total: number }) {
+  const [hints, setHints] = useState<{ id: string; content: string }[] | null>(
+    null,
+  );
+  const [revealed, setRevealed] = useState(0);
+  async function load() {
+    const r = await api.get<{ hints: { id: string; content: string }[] }>(
+      `/api/problems/${slug}/hints`,
+    );
+    setHints(r.hints);
+    setRevealed(1);
+  }
+  return (
+    <div className="mt-6">
+      <h3 className="text-lg font-semibold">Hints</h3>
+      {hints === null && (
+        <button onClick={load} className="btn mt-2 text-sm">
+          Show hint ({total} available)
+        </button>
+      )}
+      {hints && (
+        <div className="mt-2 space-y-2">
+          {hints.slice(0, revealed).map((h, i) => (
+            <div
+              key={h.id}
+              className="rounded border border-border bg-[#1c2026] p-2 text-sm"
+            >
+              <div className="mb-1 text-xs text-muted">Hint {i + 1}</div>
+              <Markdown>{h.content}</Markdown>
+            </div>
+          ))}
+          {revealed < hints.length && (
+            <button
+              onClick={() => setRevealed(revealed + 1)}
+              className="btn text-sm"
+            >
+              Reveal next hint ({hints.length - revealed} remaining)
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SolutionsList({ slug }: { slug: string }) {
+  const [items, setItems] = useState<any[] | null>(null);
+  useEffect(() => {
+    api
+      .get<{ solutions: any[] }>(`/api/problems/${slug}/solutions`)
+      .then((r) => setItems(r.solutions))
+      .catch(() => setItems([]));
+  }, [slug]);
+  if (items === null) return <p className="text-sm text-muted">Loading…</p>;
+  return (
+    <div className="space-y-2 text-sm">
+      <Link
+        href={`/problems/${slug}/solutions/new`}
+        className="btn-primary inline-block"
+      >
+        Share your solution
+      </Link>
+      {items.map((s) => (
+        <Link
+          key={s.id}
+          href={`/solutions/${s.id}`}
+          className="block rounded border border-border p-2"
+        >
+          <div className="font-medium">{s.title}</div>
+          <div className="text-xs text-muted">
+            by {s.user.username} · ▲ {s.upvotes} ·{' '}
+            {new Date(s.createdAt).toLocaleDateString()}
+          </div>
+        </Link>
+      ))}
+      {items.length === 0 && (
+        <p className="text-muted">No community solutions yet.</p>
       )}
     </div>
   );

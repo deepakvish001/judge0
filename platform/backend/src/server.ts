@@ -18,6 +18,9 @@ import { adminRouter } from './routes/admin.js';
 import { internalRouter } from './routes/internal.js';
 import { languagesRouter } from './routes/languages.js';
 import { oauthRouter } from './routes/oauth.js';
+import { bookmarksRouter } from './routes/bookmarks.js';
+import { solutionsRouter } from './routes/solutions.js';
+import { notificationsRouter } from './routes/notifications.js';
 import { authOptional } from './middleware/auth.js';
 import { errorHandler } from './middleware/error.js';
 
@@ -57,6 +60,9 @@ app.use('/api/users', usersRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/languages', languagesRouter);
 app.use('/api/internal', internalRouter);
+app.use('/api/bookmarks', bookmarksRouter);
+app.use('/api/solutions', solutionsRouter);
+app.use('/api/notifications', notificationsRouter);
 
 app.use(errorHandler);
 

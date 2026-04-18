@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { useMe } from '@/lib/me';
+import { NotificationsBell } from './NotificationsBell';
 
 export function Navbar() {
   const { me, loading } = useMe();
@@ -37,6 +38,10 @@ export function Navbar() {
                   Admin
                 </Link>
               )}
+              <Link href="/bookmarks" className="text-muted hover:text-text">
+                Bookmarks
+              </Link>
+              <NotificationsBell />
               <Link href={`/users/${me.username}`}>{me.username}</Link>
               <button onClick={logout} className="btn">
                 Sign out
