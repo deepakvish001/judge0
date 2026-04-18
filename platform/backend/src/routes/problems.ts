@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { judge0 } from '../lib/judge0.js';
+import { startSubmissionPolling } from '../lib/poller.js';
 import { authRequired } from '../middleware/auth.js';
 import { HttpError } from '../middleware/error.js';
 import { pageEnvelope, pagination } from '../lib/pagination.js';
@@ -421,23 +422,25 @@ problemsRouter.post('/:slug/submit', authRequired, async (req, res, next) => {
       },
     });
 
+    const useCallbacks = process.env.JUDGE0_USE_CALLBACKS !== 'false';
     const callbackSecret = process.env.JUDGE0_CALLBACK_SECRET ?? '';
     const publicUrl =
       process.env.PUBLIC_BACKEND_URL ?? 'http://backend:4000';
 
     const items = problem.testCases.map((tc) => {
+      const base = {
+        language_id: languageId,
+        source_code: sourceCode,
+        stdin: tc.input,
+        expected_output: tc.expectedOutput,
+      };
+      if (!useCallbacks) return base;
       const sig = crypto
         .createHmac('sha256', callbackSecret)
         .update(`${submission.id}:${tc.id}`)
         .digest('hex');
       const callback_url = `${publicUrl}/api/internal/judge0-callback?subId=${submission.id}&caseId=${tc.id}&sig=${sig}`;
-      return {
-        language_id: languageId,
-        source_code: sourceCode,
-        stdin: tc.input,
-        expected_output: tc.expectedOutput,
-        callback_url,
-      };
+      return { ...base, callback_url };
     });
 
     const tokens = await judge0.submitBatch(items);
@@ -457,6 +460,8 @@ problemsRouter.post('/:slug/submit', authRequired, async (req, res, next) => {
         }),
       ),
     ]);
+
+    if (!useCallbacks) startSubmissionPolling(submission.id);
 
     res.status(202).json({ submissionId: submission.id });
   } catch (e) {

@@ -12,6 +12,71 @@ export const internalRouter = Router();
 const fromB64 = (s?: string | null) =>
   s ? Buffer.from(s, 'base64').toString('utf8') : null;
 
+// Apply one Judge0 per-case result and recompute the parent submission.
+// Used by both the callback handler (push) and the poller (pull, for hosted Judge0).
+export async function applyJudge0CaseResult(
+  submissionId: string,
+  testCaseId: string,
+  body: any,
+  { alreadyDecoded = false }: { alreadyDecoded?: boolean } = {},
+) {
+  const verdict = judge0StatusToVerdict(body?.status?.id ?? 13);
+  const runtimeMs =
+    body?.time != null ? Math.round(parseFloat(body.time) * 1000) : null;
+  const memoryKb = body?.memory != null ? Number(body.memory) : null;
+
+  const submissionCase = await prisma.submissionCase.findFirst({
+    where: { submissionId, testCaseId },
+  });
+  if (!submissionCase) return;
+
+  await prisma.submissionCase.update({
+    where: { id: submissionCase.id },
+    data: {
+      status: verdict,
+      runtimeMs,
+      memoryKb,
+      stdout: alreadyDecoded ? body?.stdout ?? null : fromB64(body?.stdout),
+      stderr: alreadyDecoded ? body?.stderr ?? null : fromB64(body?.stderr),
+      compileOutput: alreadyDecoded
+        ? body?.compile_output ?? null
+        : fromB64(body?.compile_output),
+    },
+  });
+
+  const cases = await prisma.submissionCase.findMany({
+    where: { submissionId },
+  });
+  const allDone = cases.every((c) => isFinalVerdict(c.status));
+  const passedCount = cases.filter((c) => c.status === 'AC').length;
+
+  if (allDone) {
+    const overall = combineVerdicts(cases.map((c) => c.status));
+    const maxRuntime = Math.max(...cases.map((c) => c.runtimeMs ?? 0));
+    const maxMemory = Math.max(...cases.map((c) => c.memoryKb ?? 0));
+
+    const sub = await prisma.submission.update({
+      where: { id: submissionId },
+      data: {
+        status: overall,
+        passedCount,
+        runtimeMs: maxRuntime || null,
+        memoryKb: maxMemory || null,
+        finishedAt: new Date(),
+      },
+    });
+
+    if (overall === 'AC' && sub.contestId) {
+      await updateContestScore(sub.contestId, sub.userId);
+    }
+  } else {
+    await prisma.submission.update({
+      where: { id: submissionId },
+      data: { passedCount },
+    });
+  }
+}
+
 // Judge0 PUTs the full submission JSON (base64-encoded fields) to callback_url.
 internalRouter.put('/judge0-callback', async (req, res) => {
   const subId = req.query.subId as string;
@@ -30,66 +95,7 @@ internalRouter.put('/judge0-callback', async (req, res) => {
     res.status(401).end();
     return;
   }
-
-  const body = req.body as any;
-  const verdict = judge0StatusToVerdict(body?.status?.id ?? 13);
-  const runtimeMs =
-    body?.time != null ? Math.round(parseFloat(body.time) * 1000) : null;
-  const memoryKb = body?.memory != null ? Number(body.memory) : null;
-
-  const submissionCase = await prisma.submissionCase.findFirst({
-    where: { submissionId: subId, testCaseId: caseId },
-  });
-  if (!submissionCase) {
-    res.status(404).end();
-    return;
-  }
-
-  await prisma.submissionCase.update({
-    where: { id: submissionCase.id },
-    data: {
-      status: verdict,
-      runtimeMs,
-      memoryKb,
-      stdout: fromB64(body?.stdout),
-      stderr: fromB64(body?.stderr),
-      compileOutput: fromB64(body?.compile_output),
-    },
-  });
-
-  // Recompute submission state
-  const cases = await prisma.submissionCase.findMany({
-    where: { submissionId: subId },
-  });
-  const allDone = cases.every((c) => isFinalVerdict(c.status));
-  const passedCount = cases.filter((c) => c.status === 'AC').length;
-
-  if (allDone) {
-    const overall = combineVerdicts(cases.map((c) => c.status));
-    const maxRuntime = Math.max(...cases.map((c) => c.runtimeMs ?? 0));
-    const maxMemory = Math.max(...cases.map((c) => c.memoryKb ?? 0));
-
-    const sub = await prisma.submission.update({
-      where: { id: subId },
-      data: {
-        status: overall,
-        passedCount,
-        runtimeMs: maxRuntime || null,
-        memoryKb: maxMemory || null,
-        finishedAt: new Date(),
-      },
-    });
-
-    if (overall === 'AC' && sub.contestId) {
-      await updateContestScore(sub.contestId, sub.userId);
-    }
-  } else {
-    await prisma.submission.update({
-      where: { id: subId },
-      data: { passedCount },
-    });
-  }
-
+  await applyJudge0CaseResult(subId, caseId, req.body);
   res.status(204).end();
 });
 

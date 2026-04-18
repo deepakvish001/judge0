@@ -1,0 +1,54 @@
+# Use when you can't run Judge0 locally (Mac / no cgroup-v1 support) and
+# want to point the platform at a hosted Judge0 (e.g. https://sulu.sh).
+#
+# Usage:
+#   export JUDGE0_URL=https://judge0-ce.p.sulu.sh
+#   export JUDGE0_TOKEN=<your-sulu-key>
+#   docker compose -f platform/docker-compose.hosted.yml up -d --build
+#
+# This file is self-contained — do NOT combine it with the root compose.
+
+services:
+  platform-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: platform
+      POSTGRES_PASSWORD: platform
+      POSTGRES_DB: platform
+    volumes:
+      - platform_db:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    restart: always
+
+  backend:
+    build:
+      context: ./backend
+    environment:
+      DATABASE_URL: postgresql://platform:platform@platform-db:5432/platform?schema=public
+      JWT_SECRET: ${JWT_SECRET:-change-me-to-a-long-random-string}
+      JUDGE0_URL: ${JUDGE0_URL:-https://judge0-ce.p.sulu.sh}
+      JUDGE0_TOKEN: ${JUDGE0_TOKEN:-}
+      JUDGE0_USE_CALLBACKS: "false"
+      CORS_ORIGIN: http://localhost:3000
+      PORT: "4000"
+      NODE_ENV: development
+    depends_on:
+      - platform-db
+    ports:
+      - "4000:4000"
+    restart: always
+
+  frontend:
+    build:
+      context: ./frontend
+    environment:
+      BACKEND_URL: http://backend:4000
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+    restart: always
+
+volumes:
+  platform_db:

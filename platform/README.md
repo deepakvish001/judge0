@@ -21,13 +21,34 @@ A LeetCode-style coding-challenge platform built on top of the Judge0 execution 
 
 ## Quickstart
 
-```bash
-# From repo root. Starts Judge0 (and workers) + postgres + backend + frontend.
-docker compose -f docker-compose.yml -f platform/docker-compose.yml up -d
+### Linux / cgroup-v1 hosts — run Judge0 locally
 
-# Give Judge0 a few seconds to boot, then:
+```bash
+# Starts Judge0 (server + workers + db + redis) + platform (db + backend + frontend).
+docker compose -f docker-compose.yml -f platform/docker-compose.yml up -d --build
+
+# Give Judge0 ~30s to migrate, then:
 open http://localhost:3000
 ```
+
+### macOS (Apple Silicon / Intel) — use a hosted Judge0
+
+Docker Desktop on macOS does not expose the cgroup memory controller that
+Judge0's Isolate sandbox needs, so `Run`/`Submit` fail locally with
+`Failed to create control group … No such file or directory`. Use a
+hosted Judge0 instead (e.g. [sulu.sh](https://sulu.sh), free tier).
+
+```bash
+export JUDGE0_URL=https://judge0-ce.p.sulu.sh
+export JUDGE0_TOKEN=<your-sulu-api-key>
+
+# Runs only platform-db + backend + frontend (no local Judge0 containers).
+docker compose -f platform/docker-compose.hosted.yml up -d --build
+open http://localhost:3000
+```
+
+In this mode the backend **polls** Judge0 for submission results instead
+of receiving callbacks (a hosted Judge0 can't reach your laptop).
 
 Seeded accounts (created on first boot):
 
