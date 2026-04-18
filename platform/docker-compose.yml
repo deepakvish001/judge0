@@ -13,9 +13,9 @@ services:
 
   backend:
     build:
-      context: ./backend
+      context: ./platform/backend
     env_file:
-      - ./backend/.env
+      - ./platform/backend/.env
     environment:
       DATABASE_URL: postgresql://platform:platform@db:5432/platform?schema=public
       JWT_SECRET: ${JWT_SECRET:-change-me-to-a-long-random-string}
@@ -34,7 +34,7 @@ services:
 
   frontend:
     build:
-      context: ./frontend
+      context: ./platform/frontend
     environment:
       BACKEND_URL: http://backend:4000
     depends_on:
